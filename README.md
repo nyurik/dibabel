@@ -1,2 +1,5 @@
-# dibabel
-A Wikipedia bot to keep template and module pages on multiple wiki sites in sync.
+# DiBabel Bot
+
+This Wikipedia bot keeps template and module pages on multiple wiki sites in sync with the master copy, usually stored on mediawiki.org.
+
+See [documentation](https://www.mediawiki.org/wiki/Multilingual_Templates_and_Modules).
