@@ -1,23 +1,9 @@
-import re
-import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Tuple, List
-
+from typing import Tuple, List, Dict
 from pywikiapi import Site
 
-reSite = re.compile(r'^https://(?P<lang>[a-z0-9-_]+)\.(?P<project>[a-z0-9-_]+)\.org/.*', re.IGNORECASE)
-
-# Templates, Modules
-allowed_namespaces = {10, 828}
-
-summary_changes_i18n = {
-    'en': 'Copying {0} changes by {1}: "{2}" from {3}',
-}
-
-summary_restore_i18n = {
-    'en': 'Restoring to the current version of {0}',
-}
+from .ContentPage import ContentPage
 
 
 @dataclass
@@ -28,38 +14,7 @@ class RevComment:
     content: str
 
 
-class TargetPage:
-    def __init__(self, site: Site, title: str):
-        self.site = site
-        self.title = urllib.parse.unquote(title)
-        m = reSite.match(site.url)
-        if not m:
-            raise ValueError(f'*************** WARN: unable to parse {site.url}')
-        self.lang = m.group('lang')
-        self.project = m.group('project')
-        if self.lang != 'www':
-            self.info = f"{self.lang}.{self.project}"
-        else:
-            self.info = m.group('project')
-
-    def __str__(self):
-        return f'{self.info}/{self.title}'
-
-    def summary_link(self):
-        return f'[[mw:{self.title}]]' if self.project == 'mediawiki' else self.__str__()
-
-    def get_content(self) -> Tuple[str, datetime]:
-        page, = self.site.query_pages(
-            prop=['revisions'],
-            rvprop=['content', 'timestamp'],
-            titles=self.title)
-        if page.ns not in allowed_namespaces:
-            raise ValueError(f'Page {self.title} is a prohibited namespace {page.ns}.')
-        rev = page.revisions[0]
-        return rev.content, datetime.fromisoformat(rev.timestamp.rstrip('Z'))
-
-
-class SourcePage(TargetPage):
+class SourcePage(ContentPage):
     history: List[RevComment]
 
     def __init__(self, site: Site, title: str):
@@ -71,6 +26,7 @@ class SourcePage(TargetPage):
             prop='revisions',
             rvprop=['user', 'comment', 'timestamp', 'content'],
             rvlimit=self.rv_limit,
+            rvslots='main',
             titles=self.title)
         self._update_history(next(self.generator))
 
@@ -93,7 +49,8 @@ class SourcePage(TargetPage):
         if not result or not result.pages:
             self.generator = None
         else:
-            result = [RevComment(v.user, datetime.fromisoformat(v.timestamp.rstrip('Z')), v.comment.strip(), v.content)
+            result = [RevComment(v.user, datetime.fromisoformat(v.timestamp.rstrip('Z')), v.comment.strip(),
+                                 v.slots.main.content)
                       for v in result.pages[0].revisions]
             for v in sorted(result, key=lambda v: v.ts):
                 self.history.append(v)
@@ -113,16 +70,24 @@ class SourcePage(TargetPage):
             return False, diff_hist
         return True, diff_hist
 
-    def create_summary(self, changes: List[RevComment], lang: str) -> str:
+    def create_summary(self, changes: List[RevComment], lang: str, summary_i18n: Dict[str, str]) -> str:
+        summary_link = f'[[mw:{self.title}]]' if self.project == 'mediawiki' else self.__str__()
         if changes:
             new_users = {v.user for v in changes}
-            fmt = summary_changes_i18n[lang if lang in summary_changes_i18n else 'en']
             # dict keeps the order
             comments = {v.comment: '' for v in changes if v.comment}.keys()
-            # Copying {0} changes by {1}: {2} from {3}
-            return fmt.format(len(changes), ','.join(new_users),
-                              ', '.join(comments), self.summary_link())
+            # Copying $1 changes by $2: "$3" from $4
+            text = summary_i18n[lang if lang in summary_i18n else 'en']
+            text = text.replace('$1', str(len(changes)))
+            text = text.replace('$2', ','.join(new_users))
+            text = text.replace('$3', ', '.join(comments))
+            text = text.replace('$4', summary_link)
+
+            return self.site(
+                action='expandtemplates',
+                text=text,
+                prop='wikitext',
+            ).expandtemplates.wikitext
         else:
-            fmt = summary_restore_i18n[lang if lang in summary_restore_i18n else 'en']
             # Restoring to the current version of {0}
-            return fmt.format(self.summary_link())
+            return f'Restoring to the current version of {summary_link}'

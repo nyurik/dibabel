@@ -1,11 +1,13 @@
 import difflib
+import json
 
 import time
 
 from typing import List, Dict
 
-from dibabel.SiteCache import SiteCache
-from dibabel.SourcePage import TargetPage, SourcePage
+from .SiteCache import SiteCache
+from .SourcePage import SourcePage
+from .ContentPage import ContentPage
 from .Sparql import Sparql
 from .utils import list_to_dict_of_lists
 import re
@@ -18,7 +20,8 @@ class Dibabel:
     def __init__(self, opts) -> None:
         self.opts = opts
         self.sparql = Sparql()
-        self.sites = SiteCache(opts.user, opts.password)
+        self.sites = SiteCache()
+        self.i18n = self.get_translation_table()
 
     def run(self):
         todo = self.find_pages_to_sync()
@@ -62,22 +65,25 @@ class Dibabel:
                 continue
             if found or self.opts.force:
                 updated += 1
-                print(f'------- {"Found" if self.opts.dry_run else "Updating"} {target} -------')
-                summary = source.create_summary(changes, target.lang)
+                print(f'------- {"WOULD UPDATE" if self.opts.dry_run else "UPDATING"} {target} -------')
+                summary = source.create_summary(changes, target.lang, self.i18n)
                 print(summary)
                 new_content = changes[0].content
                 self.print_diff(new_content, old_content)
                 if not self.opts.dry_run:
-                    target.site('edit',
-                                title=target.title, text=new_content, summary=summary,
-                                basetimestamp=old_ts, bot=True, minor=True, nocreate=True,
-                                token=self.sites.token(target.site))
+                    if not target.site.logged_in:
+                        target.site.login(self.opts.user, self.opts.password)
+                    res = target.site('edit',
+                                      title=target.title, text=new_content, summary=summary,
+                                      basetimestamp=old_ts, bot=True, minor=True, nocreate=True,
+                                      token=self.sites.token(target.site))
+                    # TODO: handle edit response
                     time.sleep(15)
                 else:
                     print('Running in a dry mode, wiki update is skipped')
             else:
                 unrecognized += 1
-                print(f'------- {target} has unrecognized content, skipping -------')
+                print(f'------- SKIPPING unrecognized content in {target} -------')
                 self.print_diff(changes[0].content, old_content)
 
         print(f'Done with {source} : {len(targets)} total, {updated} updated, '
@@ -106,7 +112,12 @@ class Dibabel:
             if site_url == 'https://www.mediawiki.org':
                 source = SourcePage(self.sites.get(site_url), match.group('title'))
             else:
-                targets.append(TargetPage(self.sites.get(site_url), match.group('title')))
+                targets.append(ContentPage(self.sites.get(site_url), match.group('title')))
         if not source:
             raise ValueError(f'Unable to find source page for {qid}')
         return source, targets, bad_urls
+
+    def get_translation_table(self):
+        page = ContentPage(self.sites.get('https://commons.wikimedia.org'), 'Data:I18n/DiBabel.tab')
+        i18n, = (v for k, v in json.loads(page.get_content()[0])['data'] if k == 'edit_summary')
+        return i18n

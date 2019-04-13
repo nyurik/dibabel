@@ -1,4 +1,4 @@
 -i https://pypi.org/simple
 
-pywikiapi>=1.2.0
+pywikiapi>=1.3.2
 requests>=2.20.1

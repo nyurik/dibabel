@@ -5,26 +5,44 @@ from requests import Session
 from requests.packages.urllib3.util.retry import Retry
 
 
+class DiSite(Site):
+
+    # noinspection PyAttributeOutsideInit
+    def get_metadata(self):
+        try:
+            return self.site_metadata
+        except AttributeError:
+            # Have not initialized yet
+            res = next(self.query(meta='siteinfo', siprop='extensions'))
+            self.site_metadata = AttrDict(
+                flagged_revisions=bool(
+                    [v for v in res.extensions if 'descriptionmsg' in v and v.descriptionmsg == 'flaggedrevs-desc'])
+            )
+            if self.site_metadata['flagged_revisions']:
+                print(f'{self} has enabled flagged revisions')
+            return self.site_metadata
+
+    def has_flagged_revisions(self):
+        return self.get_metadata()['flagged_revisions']
+
+
 class SiteCache:
-    def __init__(self, user: str, password: str):
+    def __init__(self):
         self.sites = {}
         self.site_tokens = {}
-        self.user = user
-        self.password = password
         self.session = Session()
         self.session.mount('https://', HTTPAdapter(
             max_retries=Retry(total=3, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])))
 
-    def get(self, url: str) -> Site:
+    def get(self, url: str) -> DiSite:
         try:
             return self.sites[url]
         except KeyError:
-            site = Site(f'{url}/w/api.php', session=self.session, json_object_hook=AttrDict)
-            site.login(user=self.user, password=self.password, on_demand=True)
+            site = DiSite(f'{url}/w/api.php', session=self.session, json_object_hook=AttrDict)
             self.sites[url] = site
             return site
 
-    def token(self, site: Site) -> str:
+    def token(self, site: DiSite) -> str:
         try:
             return self.site_tokens[site]
         except KeyError:
