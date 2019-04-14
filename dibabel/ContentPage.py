@@ -1,7 +1,5 @@
 import re
-import urllib.parse
 from datetime import datetime
-from typing import Tuple
 
 from .SiteCache import DiSite
 
@@ -11,7 +9,7 @@ reSite = re.compile(r'^https://(?P<lang>[a-z0-9-_]+)\.(?P<project>[a-z0-9-_]+)\.
 class ContentPage:
     def __init__(self, site: DiSite, title: str):
         self.site = site
-        self.title = urllib.parse.unquote(title)
+        self.title = title
         m = reSite.match(site.url)
         if not m:
             raise ValueError(f'*************** WARN: unable to parse {site.url}')
@@ -21,8 +19,20 @@ class ContentPage:
             self.info = f"{self.lang}.{self.project}"
         else:
             self.info = m.group('project')
+        self._content = None
+        self._content_ts = None
 
-    def get_content(self) -> Tuple[str, datetime]:
+    def get_content(self) -> str:
+        self._get_content()
+        return self._content
+
+    def get_content_ts(self) -> str:
+        self._get_content()
+        return self._content_ts
+
+    def _get_content(self):
+        if self._content is not None:
+            return
         props = ['content', 'timestamp']
         if self.site.has_flagged_revisions():
             props.append('flagged')
@@ -35,7 +45,8 @@ class ContentPage:
         rev = page.revisions[0]
         # if self.site.has_flagged_revisions():
         #     TODO
-        return rev.slots.main.content, datetime.fromisoformat(rev.timestamp.rstrip('Z'))
+        self._content = rev.slots.main.content
+        self._content_ts = datetime.fromisoformat(rev.timestamp.rstrip('Z'))
 
     def __str__(self):
         return f'{self.info}.org/wiki/{self.title}'
