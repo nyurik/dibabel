@@ -1,10 +1,16 @@
-from typing import Dict, Any
+from itertools import chain
+from urllib.parse import quote
+
+from typing import Dict, Any, Iterable
 
 from pywikiapi import Site, AttrDict
 from requests.adapters import HTTPAdapter
 from requests import Session
 # noinspection PyUnresolvedReferences
 from requests.packages.urllib3.util.retry import Retry
+
+from dibabel.Sparql import Sparql
+from dibabel.utils import batches, list_to_dict_of_sets, parse_page_urls
 
 
 class DiSite(Site):
@@ -54,3 +60,45 @@ class SiteCache:
             token = site.token()
             self.site_tokens[site] = token
             return token
+
+    def update_template_cache(self, titles: Iterable[str]):
+        cache = self.template_map
+        titles = set(titles).difference(cache)
+        if not titles:
+            return
+
+        # Ask mediawiki.org to resolve titles
+        normalized = {}
+        redirects = {}
+        for batch in batches(titles, 50):
+            res = next(self.primary_site.query(titles=batch, redirects=True))
+            if 'normalized' in res:
+                normalized.update({v['from']: v.to for v in res.normalized})
+            if 'redirects' in res:
+                redirects.update({v['from']: v.to for v in res.redirects})
+
+        unknowns = set(redirects.values()) \
+            .union(set(normalized.values()).difference(redirects.keys())) \
+            .union(titles.difference(redirects.keys()).difference(normalized.keys())) \
+            .difference(cache)
+
+        vals = " ".join(
+            {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+")}>'
+             for v in unknowns}.values())
+        query = f'SELECT ?id ?sl WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. }}'
+        query_result = Sparql().query(query)
+        res = list_to_dict_of_sets(query_result, key=lambda v: v['id']['value'], value=lambda v: v['sl']['value'])
+        for values in res.values():
+            key, vals = parse_page_urls(self, values)
+            if key in cache:
+                raise ValueError(f'WARNING: Logic error - {key} is already cached')
+            cache[key] = vals
+
+        for frm, to in chain(redirects.items(), normalized.items()):
+            if to not in cache or frm in cache:
+                raise ValueError(f'WARNING: Logic error - {frm}->{to} cannot be matched with cache')
+            cache[frm] = cache[to]
+
+        for t in titles:
+            if t not in cache:
+                cache[t] = {}  # Empty dict will avoid replacements

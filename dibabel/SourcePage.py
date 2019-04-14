@@ -3,17 +3,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Tuple, List, Dict
 from pywikiapi import Site
-from itertools import chain
-from urllib.parse import quote
 
 from .SiteCache import DiSite
-from .utils import list_to_dict_of_sets, parse_page_urls, batches
-from .Sparql import Sparql
 from .ContentPage import ContentPage
 
 # Find any string that is a template name
 # Must be preceded by two {{ (not 3!), must be followed by either "|" or "}", must not include any funky characters
-reTemplateName = re.compile(r'((?:^|[^{]){{\s*)([^|{}<>&#:]*[^|{}<>&#: ])(\s*[|}])')
+reTemplateName = re.compile(r'''((?:^|[^{]){{\s*)([^|{}<>&#:]*[^|{}<>&#: ])(\s*[|}])''')
+
+# Find any require('Module:name')
+# must be preceded by a space or an operation like = or a comma.
+reModuleName = re.compile(r'''((?:^|\s|=|,|\()require\s*\(\s*)('[^']+'|"[^"]+")(\s*\))''')
 
 
 @dataclass
@@ -31,6 +31,7 @@ class SourcePage(ContentPage):
         super().__init__(site, title)
 
         self.history = []
+        self.is_module = self.title.startswith('Module:')
         self.generator = self.site.query(
             prop='revisions',
             rvprop=['user', 'comment', 'timestamp', 'content'],
@@ -109,52 +110,46 @@ class SourcePage(ContentPage):
     def replace_templates(self, content: str, target_site: DiSite):
         site_cache = self.site.site_cache
         cache = site_cache.template_map
-        templates = set(('Template:' + v[1] for v in reTemplateName.findall(content))).difference(cache)
-        self.update_template_cache(site_cache, templates)
 
-        def function(m):
-            name = m.group(2)
-            fullname = 'Template:' + name
-            if fullname in cache and target_site in cache[fullname]:
-                name = cache[fullname][target_site].split(':', maxsplit=1)[1]
-            return m.group(1) + name + m.group(3)
+        if self.is_module:
+            titles = (v[1] for v in reModuleName.findall(content))
+        else:
+            titles = ('Template:' + v[1] for v in reTemplateName.findall(content))
 
-        return reTemplateName.sub(function, content)
+        self.site.site_cache.update_template_cache(titles)
 
-    def update_template_cache(self, site_cache, templates):
-        cache = site_cache.template_map
-        if templates:
-            normalized = {}
-            redirects = {}
-            for batch in batches(templates, 50):
-                res = next(site_cache.primary_site.query(titles=batch, redirects=True))
-                if 'normalized' in res:
-                    normalized.update({v['from']: v.to for v in res.normalized})
-                if 'redirects' in res:
-                    redirects.update({v['from']: v.to for v in res.redirects})
+        if self.is_module:
 
-            unknowns = set(redirects.values()) \
-                .union(set(normalized.values()).difference(redirects.keys())) \
-                .union(templates.difference(redirects.keys()).difference(normalized.keys())) \
-                .difference(cache)
+            def sub_module(m):
+                name = m.group(2)
+                fullname = name[1:-1]  # strip first and last quote symbol
+                if fullname in cache and target_site in cache[fullname]:
+                    repl = cache[fullname][target_site]
+                    quote = name[0]
+                    if quote not in repl:
+                        name = quote + repl + quote
+                    else:
+                        quote = '"' if quote == "'" else "'"
+                        if quote not in repl:
+                            name = quote + repl + quote
+                        else:
+                            name = "'" + repl.replace("'", "\\'") + "'"
+                else:
+                    print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
 
-            vals = " ".join(
-                {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+")}>'
-                 for v in unknowns}.values())
-            query = f'SELECT ?id ?sl WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. }}'
-            query_result = Sparql().query(query)
-            res = list_to_dict_of_sets(query_result, key=lambda v: v['id']['value'], value=lambda v: v['sl']['value'])
-            for values in res.values():
-                key, vals = parse_page_urls(site_cache, values)
-                if key in cache:
-                    raise ValueError(f'WARNING: Logic error - {key} is already cached')
-                cache[key] = vals
+                return m.group(1) + name + m.group(3)
 
-            for frm, to in chain(redirects.items(), normalized.items()):
-                if to not in cache or frm in cache:
-                    raise ValueError(f'WARNING: Logic error - {frm}->{to} cannot be matched with cache')
-                cache[frm] = cache[to]
+            return reModuleName.sub(sub_module, content)
 
-            for t in templates:
-                if t not in cache:
-                    cache[t] = {}  # Empty dict will avoid replacements
+        else:
+
+            def sub_template(m):
+                name = m.group(2)
+                fullname = 'Template:' + name
+                if fullname in cache and target_site in cache[fullname]:
+                    name = cache[fullname][target_site].split(':', maxsplit=1)[1]
+                else:
+                    print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
+                return m.group(1) + name + m.group(3)
+
+            return reTemplateName.sub(sub_template, content)
