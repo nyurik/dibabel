@@ -1,7 +1,7 @@
+import re
 from itertools import chain
 from urllib.parse import quote
-
-from typing import Dict, Any, Iterable
+from typing import Dict, Iterable
 
 from pywikiapi import Site, AttrDict
 from requests.adapters import HTTPAdapter
@@ -18,7 +18,22 @@ class DiSite(Site):
     def __init__(self, site_cache: 'SiteCache', url: str):
         super().__init__(url, session=site_cache.session, json_object_hook=AttrDict)
         self.site_cache = site_cache
+        self.magic_words = None
         self.flagged_revisions = None
+
+    def get_magicwords(self):
+        if self.magic_words is None:
+            # Have not initialized yet
+            res = next(self.query(meta='siteinfo', siprop='magicwords'))
+            # Only remember template-like magicwords (uppercase, don't begin with a "_")
+            words = [vvv for vv in
+                     (v.aliases for v in res.magicwords if v['case-sensitive'])
+                     for vvv in vv if re.match(r'^[A-Z!]', vvv)]
+            # those that end with a colon allow arbitrary text afterwards
+            self.magic_words = (
+                set((v for v in words if not v.endswith(':'))),
+                set((v for v in words if v.endswith(':'))))
+        return self.magic_words
 
     def has_flagged_revisions(self):
         if self.flagged_revisions is None:

@@ -73,6 +73,8 @@ class Dibabel:
                                title=title, text=new_content, summary=summary,
                                basetimestamp=target.get_content_ts(), bot=True, minor=True, nocreate=True,
                                token=self.sites.token(site))
+                    if res.edit.result != 'ok':
+                        print(f'ERROR: Update failed - {res.edit.info}')
                     # TODO: handle edit response
                     time.sleep(15)
                 else:

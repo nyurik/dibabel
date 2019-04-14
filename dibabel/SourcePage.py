@@ -98,11 +98,13 @@ class SourcePage(ContentPage):
             text = text.replace('$3', ', '.join(comments))
             text = text.replace('$4', summary_link)
 
-            return self.site(
+            res = self.site(
                 action='expandtemplates',
                 text=text,
-                prop='wikitext',
-            ).expandtemplates.wikitext
+                prop='wikitext')
+
+            # for some reason template expansions add \n in some places
+            return res.expandtemplates.wikitext.replace('\n', '')
         else:
             # Restoring to the current version of {0}
             return f'Restoring to the current version of {summary_link}'
@@ -145,11 +147,13 @@ class SourcePage(ContentPage):
 
             def sub_template(m):
                 name = m.group(2)
-                fullname = 'Template:' + name
-                if fullname in cache and target_site in cache[fullname]:
-                    name = cache[fullname][target_site].split(':', maxsplit=1)[1]
-                else:
-                    print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
+                magicwords, magicprefixes = self.site.get_magicwords()
+                if name not in magicwords and not any(v for v in magicprefixes if name.startswith(v)):
+                    fullname = 'Template:' + name
+                    if fullname in cache and target_site in cache[fullname]:
+                        name = cache[fullname][target_site].split(':', maxsplit=1)[1]
+                    else:
+                        print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
                 return m.group(1) + name + m.group(3)
 
             return reTemplateName.sub(sub_template, content)
