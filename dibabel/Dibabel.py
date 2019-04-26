@@ -49,6 +49,7 @@ class Dibabel:
 
     def process_page(self, qid, page_urls):
         updated = 0
+        failed = 0
         unrecognized = 0
         source, targets = parse_page_urls(self.sites, page_urls, qid)
         source = SourcePage(self.sites.primary_site, source)
@@ -61,7 +62,6 @@ class Dibabel:
                 print(f'{target} is up to date')
                 continue
             if found or self.opts.force:
-                updated += 1
                 print(f'------- {"WOULD UPDATE" if self.opts.dry_run else "UPDATING"} {target} -------')
                 summary = source.create_summary(changes, target.lang, self.i18n)
                 print(summary)
@@ -73,8 +73,11 @@ class Dibabel:
                                title=title, text=new_content, summary=summary,
                                basetimestamp=target.get_content_ts(), bot=True, minor=True, nocreate=True,
                                token=self.sites.token(site))
-                    if res.edit.result != 'ok':
-                        print(f'ERROR: Update failed - {res.edit.info}')
+                    if res.edit.result != 'Success':
+                        print(f'ERROR: Update failed - {res.edit.info if "info" in res.edit else json.dumps(res.edit)}')
+                        failed += 1
+                    else:
+                        updated += 1
                     # TODO: handle edit response
                     time.sleep(15)
                 else:
@@ -84,8 +87,9 @@ class Dibabel:
                 print(f'------- SKIPPING unrecognized content in {target} -------')
                 self.print_diff(changes[0].content, target.get_content())
 
-        print(f'Done with {source} : {len(targets)} total, {updated} updated, '
-              f'{unrecognized} have unrecognized content, {len(targets) - updated - unrecognized} are up to date.')
+        unchanged = len(targets) - updated - unrecognized - failed
+        print(f'Done with {source} : {len(targets)} total, {updated} updated, {failed} failed update, '
+              f'{unrecognized} have unrecognized content, {unchanged} are up to date.')
 
     def print_diff(self, new_content, old_content):
         if self.opts.show_diff:

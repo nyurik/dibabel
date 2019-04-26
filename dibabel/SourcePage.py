@@ -73,13 +73,21 @@ class SourcePage(ContentPage):
         cur_content = target.get_content()
         desired_content = None
         for hist in self.get_history():
-            if hist.content == cur_content:
-                break
             adj = self.replace_templates(hist.content, target.site)
-            if adj == cur_content:
-                break
             if desired_content is None:
+                # Comparing current revision of the master page
                 desired_content = adj
+                # Latest revision must match adjusted content
+                if adj == cur_content:
+                    # Latest matches what we expect, nothing to do
+                    break
+                elif hist.content == cur_content:
+                    # local template was renamed without any changes in master, re-add last revision
+                    diff_hist.append(hist)
+                    break
+            elif adj == cur_content or hist.content == cur_content:
+                # One of the previous revisions matches current state of the target
+                break
             diff_hist.append(hist)
         else:
             return False, diff_hist, desired_content

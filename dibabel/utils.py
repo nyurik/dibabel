@@ -27,7 +27,7 @@ def parse_page_urls(sites, page_urls: Iterable[str], qid=None):
             bad_urls.append(url)
             continue
         site_url = match.group('site')
-        title = unquote(match.group('title'))
+        title = unquote(match.group('title')).replace('_', ' ')
         if site_url == 'https://www.mediawiki.org':
             source = title
         else:

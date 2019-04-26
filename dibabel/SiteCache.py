@@ -98,7 +98,7 @@ class SiteCache:
             .difference(cache)
 
         vals = " ".join(
-            {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+")}>'
+            {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+/")}>'
              for v in unknowns}.values())
         query = f'SELECT ?id ?sl WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. }}'
         query_result = Sparql().query(query)
