@@ -11,9 +11,9 @@ from .ContentPage import ContentPage
 # Must be preceded by two {{ (not 3!), must be followed by either "|" or "}", must not include any funky characters
 reTemplateName = re.compile(r'''((?:^|[^{]){{\s*)([^|{}<>&#:]*[^|{}<>&#: ])(\s*[|}])''')
 
-# Find any require('Module:name')
+# Find any require('Module:name') and mw.loadData('Module:name')
 # must be preceded by a space or an operation like = or a comma.
-reModuleName = re.compile(r'''((?:^|\s|=|,|\()require\s*\(\s*)('[^']+'|"[^"]+")(\s*\))''')
+reModuleName = re.compile(r'''((?:^|\s|=|,|\()(?:require|mw\.loadData)\s*\(\s*)('[^']+'|"[^"]+")(\s*\))''')
 
 
 @dataclass
@@ -155,8 +155,8 @@ class SourcePage(ContentPage):
 
             def sub_template(m):
                 name = m.group(2)
-                magicwords, magicprefixes = self.site.get_magicwords()
-                if name not in magicwords and not any(v for v in magicprefixes if name.startswith(v)):
+                magic_words, magic_prefixes = self.site.get_magicwords()
+                if name not in magic_words and not any(v for v in magic_prefixes if name.startswith(v)):
                     fullname = 'Template:' + name
                     if fullname in cache and target_site in cache[fullname]:
                         name = cache[fullname][target_site].split(':', maxsplit=1)[1]
