@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Set, Union
 from pywikiapi import Site
 
 from .SiteCache import DiSite
@@ -14,6 +14,10 @@ reTemplateName = re.compile(r'''((?:^|[^{]){{\s*)([^|{}<>&#:]*[^|{}<>&#: ])(\s*[
 # Find any require('Module:name') and mw.loadData('Module:name')
 # must be preceded by a space or an operation like = or a comma.
 reModuleName = re.compile(r'''((?:^|\s|=|,|\()(?:require|mw\.loadData)\s*\(\s*)('[^']+'|"[^"]+")(\s*\))''')
+
+well_known_lua_modules = {
+    'libraryUtil'
+}
 
 
 @dataclass
@@ -63,23 +67,35 @@ class SourcePage(ContentPage):
             for v in sorted(result, key=lambda v: v.ts):
                 self.history.append(v)
 
-    def find_new_revisions(self, target: ContentPage) -> Tuple[bool, List[RevComment], str]:
+    def find_new_revisions(self, target: ContentPage) -> \
+            Tuple[bool, List[RevComment], Union[str, None], Union[Set[str], None], Union[Set[str], None]]:
         """
         Finds a given content in master revision history, and returns a list of all revisions since then
         :param target: content to find
-        :return: if it was found or not, and a list of revisions since then (or all if not found), and the new content
+        :return: If the target's current revision was found in source's history, List of revisions changed since then,
+                 the new content for the target, and a set of the missing templates/modules
         """
         diff_hist = []
-        cur_content = target.get_content()
         desired_content = None
+        missing_dependencies = None
+        nonshared_dependencies = None
+
+        cur_content = target.get_content()
+        if not cur_content:
+            return False, diff_hist, desired_content, missing_dependencies, nonshared_dependencies
+
+        found = True
         for hist in self.get_history():
-            adj = self.replace_templates(hist.content, target.site)
+            adj, missing, nonshared = self.replace_templates(hist.content, target.site)
             if desired_content is None:
                 # Comparing current revision of the master page
                 desired_content = adj
+                missing_dependencies = missing
+                nonshared_dependencies = nonshared
                 # Latest revision must match adjusted content
-                if adj == cur_content:
-                    # Latest matches what we expect, nothing to do
+                if adj == cur_content or missing_dependencies:
+                    # Latest matches what we expect - nothing to do,
+                    # or there are missing dependent modules/templates, stop
                     break
                 elif hist.content == cur_content:
                     # local template was renamed without any changes in master, re-add last revision
@@ -90,8 +106,9 @@ class SourcePage(ContentPage):
                 break
             diff_hist.append(hist)
         else:
-            return False, diff_hist, desired_content
-        return True, diff_hist, desired_content
+            found = False
+
+        return found, diff_hist, desired_content, missing_dependencies, nonshared_dependencies
 
     def create_summary(self, changes: List[RevComment], lang: str, summary_i18n: Dict[str, str]) -> str:
         summary_link = f'[[mw:{self.title}]]' if self.project == 'mediawiki' else self.__str__()
@@ -117,12 +134,15 @@ class SourcePage(ContentPage):
             # Restoring to the current version of {0}
             return f'Restoring to the current version of {summary_link}'
 
-    def replace_templates(self, content: str, target_site: DiSite):
+    def replace_templates(self, content: str, target_site: DiSite) -> Tuple[str, set, set]:
         site_cache = self.site.site_cache
         cache = site_cache.template_map
+        missing_dependencies = set()
+        nonshared_dependencies = set()
 
         if self.is_module:
-            titles = (v[1] for v in reModuleName.findall(content))
+            titles = (v for v in (vv[1][1:-1] for vv in reModuleName.findall(content))
+                      if v not in well_known_lua_modules)
         else:
             titles = ('Template:' + v[1] for v in reTemplateName.findall(content))
 
@@ -133,6 +153,8 @@ class SourcePage(ContentPage):
             def sub_module(m):
                 name = m.group(2)
                 fullname = name[1:-1]  # strip first and last quote symbol
+                if fullname in cache and 'not-shared' in cache[fullname]:
+                    nonshared_dependencies.add(fullname)
                 if fullname in cache and target_site in cache[fullname]:
                     repl = cache[fullname][target_site]
                     quote = name[0]
@@ -144,12 +166,12 @@ class SourcePage(ContentPage):
                             name = quote + repl + quote
                         else:
                             name = "'" + repl.replace("'", "\\'") + "'"
-                else:
-                    print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
+                elif fullname not in well_known_lua_modules:
+                    missing_dependencies.add(fullname)
 
                 return m.group(1) + name + m.group(3)
 
-            return reModuleName.sub(sub_module, content)
+            new_content = reModuleName.sub(sub_module, content)
 
         else:
 
@@ -158,10 +180,14 @@ class SourcePage(ContentPage):
                 magic_words, magic_prefixes = self.site.get_magicwords()
                 if name not in magic_words and not any(v for v in magic_prefixes if name.startswith(v)):
                     fullname = 'Template:' + name
+                    if fullname in cache and 'not-shared' in cache[fullname]:
+                        nonshared_dependencies.add(fullname)
                     if fullname in cache and target_site in cache[fullname]:
                         name = cache[fullname][target_site].split(':', maxsplit=1)[1]
                     else:
-                        print(f'WARNING: Dependency {fullname} might not exist on {target_site}')
+                        missing_dependencies.add(fullname)
                 return m.group(1) + name + m.group(3)
 
-            return reTemplateName.sub(sub_template, content)
+            new_content = reTemplateName.sub(sub_template, content)
+
+        return new_content, missing_dependencies, nonshared_dependencies

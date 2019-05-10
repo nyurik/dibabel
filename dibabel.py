@@ -1,16 +1,18 @@
 """Dibabel keeps wiki resources in sync between languages and sites.
 
 Usage:
-  dibabel.py <optfile> [--diff] [--dry-run] [--force] [--item=<id>]...
-  dibabel.py --user=<user> --password=<pw> [--diff] [--dry-run] [--force] [--item=<id>]...
+  dibabel.py <optfile> [--no-diff] [--show-unknown] [--dry-run] [--force] [--site=<site>]... [--item=<id>]...
+  dibabel.py --user=<user> --password=<pw> [--no-diff] [--show-unknown] [--dry-run] [--force] [--site=<site>]... [--item=<id>]...
   dibabel.py (-h | --help)
   dibabel.py --version
 
 Options:
   -u --user=<user>    Wikipedia bot username.
   -p --password=<pw>  Wikipedia bot password.
-  -d --diff           Show diff for each change.
+  -d --no-diff        Do not show diff for each change.
+  -w --show-unknown   Show diff when local revision is not recognized.
   -n --dry-run        Do everything except actually making wiki modifications
+  -s --site=<site>... Limit to the specific site(s), e.g. "en.wikipedia"
   -f --force          Overwrite content even if it does not match any of the master's history
   -q --item=<id>...   Wikidata item to process. Multiple ones can be specified.
   -h --help           Show this screen.
@@ -34,6 +36,7 @@ def parse_arguments(args):
                 raise ValueError('Options file has no "password" parameter')
             user = options.user
             password = options.password
+            restrictions = options.restrictions if 'restrictions' in options else {}
     else:
         user = args['--user']
         password = args['--password']
@@ -46,12 +49,19 @@ def parse_arguments(args):
     if items and not all((re.match('^Q[1-9][0-9]{0,15}$', v) for v in items)):
         raise ValueError('All items must be valid Wikidata ids like Q12345')
 
+    sites = args['--site']
+    if sites and not all((re.match('^[a-z-]+\.[a-z]+$', v) for v in sites)):
+        raise ValueError('All sites must be valid strings like en.wikipedia or www.wikidata')
+
     return AttrDict(
         user=user,
         password=password,
-        show_diff=args['--diff'],
+        restrictions=restrictions,
+        show_diff=not args['--no-diff'],
+        show_unknown=args['--show-unknown'],
         dry_run=args['--dry-run'],
         force=args['--force'],
+        sites=sites,
         items=items,
     )
 

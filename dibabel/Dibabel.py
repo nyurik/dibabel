@@ -21,6 +21,10 @@ class Dibabel:
         self.sites = SiteCache()
         self.i18n = self.get_translation_table()
 
+        self.allowed_sites = None
+        if opts.sites:
+            self.allowed_sites = [self.sites.getSite(f'https://{s}.org') for s in opts.sites]
+
     def run(self):
         todo = self.find_pages_to_sync()
         print(f'Processing {len(todo)} pages')
@@ -53,11 +57,20 @@ class Dibabel:
         unrecognized = 0
         source, targets = parse_page_urls(self.sites, page_urls, qid)
         source = SourcePage(self.sites.primary_site, source)
+
+        if self.allowed_sites:
+            targets = {t[0]: t[1] for t in targets.items() if t[0] in self.allowed_sites}
+
         print(f'Processing {source} ({qid}) -- {len(targets)} pages')
 
         for site, title in targets.items():
             target = ContentPage(site, title)
-            found, changes, new_content = source.find_new_revisions(target)
+            found, changes, new_content, missing_deps, nonshared_deps = source.find_new_revisions(target)
+            if nonshared_deps:
+                print(f'WARNING: {target} has non-shared dependencies: [[{"]], [[".join(nonshared_deps)}]]')
+            if missing_deps:
+                print(f'WARNING: {target} does not have [[{"]], [[".join(missing_deps)}]]')
+                continue
             if not changes:
                 print(f'{target} is up to date')
                 continue
@@ -65,41 +78,51 @@ class Dibabel:
                 print(f'------- {"WOULD UPDATE" if self.opts.dry_run else "UPDATING"} {target} -------')
                 summary = source.create_summary(changes, target.lang, self.i18n)
                 print(summary)
-                self.print_diff(new_content, target.get_content())
-                if not self.opts.dry_run:
-                    if not site.logged_in:
-                        site.login(self.opts.user, self.opts.password)
-                    res = site('edit',
-                               title=title, text=new_content, summary=summary,
-                               basetimestamp=target.get_content_ts(), bot=True, minor=True, nocreate=True,
-                               token=self.sites.token(site))
-                    if res.edit.result != 'Success':
-                        print(f'ERROR: Update failed - {res.edit.info if "info" in res.edit else json.dumps(res.edit)}')
+                if self.opts.show_diff:
+                    self.print_diff(new_content, target.get_content())
+                if (not self.opts.dry_run and (
+                        site.url not in self.opts.restrictions or
+                        qid in self.opts.restrictions[site.url]
+                )):
+                    try:
+                        if not site.logged_in:
+                            site.login(self.opts.user, self.opts.password)
+                        res = site('edit',
+                                   title=title, text=new_content, summary=summary,
+                                   basetimestamp=target.get_content_ts(), bot=True, minor=True, nocreate=True,
+                                   token=self.sites.token(site))
+                        if res.edit.result != 'Success':
+                            reason = res.edit.info if "info" in res.edit else json.dumps(res.edit)
+                            print(f'ERROR: Update failed - {reason}')
+                            failed += 1
+                        else:
+                            updated += 1
+                    except Exception as err:
+                        print(f'ERROR: Failed updating {target}: {err}')
                         failed += 1
-                    else:
-                        updated += 1
-                    # TODO: handle edit response
-                    time.sleep(15)
+
+                    time.sleep(7)
                 else:
                     print('Running in a dry mode, wiki update is skipped')
+                    updated += 1
             else:
                 unrecognized += 1
                 print(f'------- SKIPPING unrecognized content in {target} -------')
-                self.print_diff(changes[0].content, target.get_content())
+                if self.opts.show_unknown:
+                    self.print_diff(changes[0].content, target.get_content())
 
         unchanged = len(targets) - updated - unrecognized - failed
         print(f'Done with {source} : {len(targets)} total, {updated} updated, {failed} failed update, '
               f'{unrecognized} have unrecognized content, {unchanged} are up to date.')
 
     def print_diff(self, new_content, old_content):
-        if self.opts.show_diff:
-            lines = (
-                ('32;107' if s.startswith('+') else
-                 '31;107' if s.startswith('-') else
-                 '33;107' if s.startswith('@@') else
-                 '0', s)
-                for s in difflib.unified_diff(old_content.split('\n')[1:-1], new_content.split('\n')[1:-1]))
-            print(f'\n  ' + '\n  '.join([f"\x1b[{s[0]}m{s[1].rstrip()}\x1b[0m" for s in lines][2:]) + '\n')
+        lines = (
+            ('32;107' if s.startswith('+') else
+             '31;107' if s.startswith('-') else
+             '33;107' if s.startswith('@@') else
+             '0', s)
+            for s in difflib.unified_diff(old_content.split('\n')[1:-1], new_content.split('\n')[1:-1]))
+        print(f'\n  ' + '\n  '.join([f"\x1b[{s[0]}m{s[1].rstrip()}\x1b[0m" for s in lines][2:]) + '\n')
 
     def get_translation_table(self):
         page = ContentPage(self.sites.getSite('https://commons.wikimedia.org'), 'Data:I18n/DiBabel.tab')

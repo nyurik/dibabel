@@ -13,6 +13,9 @@ from dibabel.Sparql import Sparql
 from dibabel.utils import batches, list_to_dict_of_sets, parse_page_urls
 
 
+known_unshared = {'Template:Documentation'}
+
+
 class DiSite(Site):
 
     def __init__(self, site_cache: 'SiteCache', url: str):
@@ -44,6 +47,9 @@ class DiSite(Site):
             if self.flagged_revisions:
                 print(f'{self} has enabled flagged revisions')
         return self.flagged_revisions
+
+    def __str__(self):
+        return super().__str__().replace('/w/api.php', '')
 
 
 class SiteCache:
@@ -100,19 +106,25 @@ class SiteCache:
         vals = " ".join(
             {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+/")}>'
              for v in unknowns}.values())
-        query = f'SELECT ?id ?sl WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. }}'
+        query = f'SELECT ?id ?sl ?ismult WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. BIND( EXISTS {{?id wdt:P31 wd:Q63090714}} AS ?ismult) }}'
         query_result = Sparql().query(query)
-        res = list_to_dict_of_sets(query_result, key=lambda v: v['id']['value'], value=lambda v: v['sl']['value'])
-        for values in res.values():
+        res = list_to_dict_of_sets(query_result, key=lambda v: (v['id']['value'], v['ismult']['value']), value=lambda v: v['sl']['value'])
+        for res_key, values in res.items():
             key, vals = parse_page_urls(self, values)
             if key in cache:
                 raise ValueError(f'WARNING: Logic error - {key} is already cached')
             cache[key] = vals
+            if res_key[1] == 'false' and key not in known_unshared:
+                cache[key]['not-shared'] = True
+            unknowns.remove(key)
 
         for frm, to in chain(redirects.items(), normalized.items()):
-            if to not in cache or frm in cache:
-                raise ValueError(f'WARNING: Logic error - {frm}->{to} cannot be matched with cache')
-            cache[frm] = cache[to]
+            if to not in cache:
+                cache[frm] = {'not-shared': True}
+            elif frm in cache:
+                raise ValueError(f'WARNING: Logic error - {frm} is already cached')
+            else:
+                cache[frm] = cache[to]
 
         for t in titles:
             if t not in cache:

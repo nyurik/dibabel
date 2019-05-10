@@ -42,6 +42,10 @@ class ContentPage:
             rvprop=props,
             rvslots='main',
             titles=self.title)
+        if 'missing' in page:
+            self._content = False
+            self._content_ts = False
+            return
         rev = page.revisions[0]
         # if self.site.has_flagged_revisions():
         #     TODO
