@@ -121,7 +121,7 @@ class Dibabel:
              '31;107' if s.startswith('-') else
              '33;107' if s.startswith('@@') else
              '0', s)
-            for s in difflib.unified_diff(old_content.split('\n')[1:-1], new_content.split('\n')[1:-1]))
+            for s in difflib.unified_diff(old_content.split('\n'), new_content.split('\n')))
         print(f'\n  ' + '\n  '.join([f"\x1b[{s[0]}m{s[1].rstrip()}\x1b[0m" for s in lines][2:]) + '\n')
 
     def get_translation_table(self):

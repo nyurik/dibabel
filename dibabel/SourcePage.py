@@ -50,22 +50,21 @@ class SourcePage(ContentPage):
         while self.generator:
             try:
                 ind = len(self.history)
-                response = self.generator.send({'rvlimit': min(ind * 5, 25)} if ind > 0 else None)
-                self._update_history(response)
+                result = self.generator.send({'rvlimit': min(ind * 5, 25)} if ind > 0 else None)
+
+                if not result or not result.pages:
+                    self.generator = None
+                else:
+                    result = [RevComment(v.user, datetime.fromisoformat(v.timestamp.rstrip('Z')), v.comment.strip(),
+                                         v.slots.main.content)
+                              for v in result.pages[0].revisions]
+                    for v in sorted(result, key=lambda v: v.ts, reverse=True):
+                        self.history.append(v)
+
                 for i in range(ind, len(self.history)):
                     yield self.history[i]
             except StopIteration:
                 self.generator = None
-
-    def _update_history(self, result):
-        if not result or not result.pages:
-            self.generator = None
-        else:
-            result = [RevComment(v.user, datetime.fromisoformat(v.timestamp.rstrip('Z')), v.comment.strip(),
-                                 v.slots.main.content)
-                      for v in result.pages[0].revisions]
-            for v in sorted(result, key=lambda v: v.ts):
-                self.history.append(v)
 
     def find_new_revisions(self, target: ContentPage) -> \
             Tuple[bool, List[RevComment], Union[str, None], Union[Set[str], None], Union[Set[str], None]]:
