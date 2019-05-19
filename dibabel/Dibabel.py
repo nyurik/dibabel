@@ -18,7 +18,7 @@ class Dibabel:
 
     def __init__(self, opts) -> None:
         self.opts = opts
-        self.sites = SiteCache()
+        self.sites = SiteCache(opts.source)
         self.i18n = self.get_translation_table()
 
         self.allowed_sites = None

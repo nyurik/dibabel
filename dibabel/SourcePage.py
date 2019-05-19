@@ -110,7 +110,7 @@ class SourcePage(ContentPage):
         return found, diff_hist, desired_content, missing_dependencies, nonshared_dependencies
 
     def create_summary(self, changes: List[RevComment], lang: str, summary_i18n: Dict[str, str]) -> str:
-        summary_link = f'[[mw:{self.title}]]' if self.project == 'mediawiki' else self.__str__()
+        summary_link = f'[[mw:{self.title}]]'
         if changes:
             new_users = {v.user for v in changes}
             # dict keeps the order

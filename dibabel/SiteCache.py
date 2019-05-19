@@ -56,7 +56,7 @@ class SiteCache:
     # Template name -> dict( language code -> localized template name )
     template_map: Dict[str, Dict[DiSite, str]]
 
-    def __init__(self):
+    def __init__(self, source):
         self.template_map = {}
         self.sites = {}
         self.site_tokens = {}
@@ -64,7 +64,8 @@ class SiteCache:
         self.session.mount('https://', HTTPAdapter(
             max_retries=Retry(total=3, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])))
 
-        self.primary_site = self.getSite('https://www.mediawiki.org')
+        self.primary_site_url = f'https://{source}.org'
+        self.primary_site = self.getSite(self.primary_site_url)
 
     def getSite(self, url: str) -> DiSite:
         try:
@@ -88,7 +89,7 @@ class SiteCache:
         if not titles:
             return
 
-        # Ask mediawiki.org to resolve titles
+        # Ask source to resolve titles
         normalized = {}
         redirects = {}
         for batch in batches(titles, 50):
@@ -104,7 +105,7 @@ class SiteCache:
             .difference(cache)
 
         vals = " ".join(
-            {v: f'<https://www.mediawiki.org/wiki/{quote(v.replace(" ", "_"), ": &=+/")}>'
+            {v: f'<{self.primary_site_url}/wiki/{quote(v.replace(" ", "_"), ": &=+/")}>'
              for v in unknowns}.values())
         query = f'SELECT ?id ?sl ?ismult WHERE {{ VALUES ?mw {{ {vals} }} ?mw schema:about ?id. ?sl schema:about ?id. BIND( EXISTS {{?id wdt:P31 wd:Q63090714}} AS ?ismult) }}'
         query_result = Sparql().query(query)
