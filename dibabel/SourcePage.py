@@ -92,15 +92,15 @@ class SourcePage(ContentPage):
                 missing_dependencies = missing
                 nonshared_dependencies = nonshared
                 # Latest revision must match adjusted content
-                if adj == cur_content or missing_dependencies:
+                if missing_dependencies or adj.rstrip() == cur_content.rstrip():
                     # Latest matches what we expect - nothing to do,
                     # or there are missing dependent modules/templates, stop
                     break
-                elif hist.content == cur_content:
+                elif hist.content.rstrip() == cur_content.rstrip():
                     # local template was renamed without any changes in master, re-add last revision
                     diff_hist.append(hist)
                     break
-            elif adj == cur_content or hist.content == cur_content:
+            elif adj.rstrip() == cur_content.rstrip() or hist.content.rstrip() == cur_content.rstrip():
                 # One of the previous revisions matches current state of the target
                 break
             diff_hist.append(hist)
