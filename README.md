@@ -1,6 +1,6 @@
 # OBSOLETE
 
-This project has been supersceeded by [DiBabel-js](https://github.com/nyurik/dibabel).
+This project has been superseded by [DiBabel-js](https://github.com/nyurik/dibabel).
 
 # DiBabel Bot
 
