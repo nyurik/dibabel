@@ -1,3 +1,7 @@
+# OBSOLETE
+
+This project has been supersceeded by [DiBabel-js](https://github.com/nyurik/dibabel).
+
 # DiBabel Bot
 
 This Wikipedia bot keeps template and module pages on multiple wiki sites in sync with the master copy, usually stored on mediawiki.org.
